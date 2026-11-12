@@ -295,6 +295,74 @@ the hub were 10 firmwares it added or updated later that day. Pictures:
       level. Then `jedgarpark/FM-1_Flasher` is archived with a pointer, so the
       upstream links, the tags and the `firmware-20261102` release keep working.
 
+## Future: Fruit Jam and the Fruit Jam Touchdeck
+
+A possible second board (assessed 12 November 2026, nothing built): the
+Adafruit Fruit Jam (RP2350B, 8 MB PSRAM, ESP32-C6 WiFi, microSD) with the
+upcoming Fruit Jam Touchdeck add-on:
+
+- 2.8" ILI9341 320x240 TFT, the same panel size as the Metro's shield, on
+  SPI (MOSI GPIO31, MISO GPIO28, SCK GPIO30), CS D6, DC D7.
+- Resistive touch: TSC2007 on I2C at 0x48 (SDA GPIO20, SCL GPIO21), pen
+  interrupt on A2 (active low, 10K pull-up).
+- A1 resets the display and cycles the TSC2007's power (its own regulator,
+  enabled by the display reset), separately from the host's reset.
+- Backlight on by default; D10 is active-high PWM for dimming.
+- Buttons A (D8) and B (D9), active low with internal pull-ups; they share
+  GPIO8/9 with the UART. UF2 and Reset buttons parallel the host's.
+
+**What carries over unchanged:** `fm1proto`, `fm1update`, `fm1catalog`,
+`fm1pic`, `fm1usb` (`usb.core`) and every screen, since `layout.py` is
+already 320x240. The hardware sits behind `fm1ui.device`'s objects
+(display, touch, card, USB host, network), so the port is mostly a
+`fm1ui/fruit_jam.py` beside `metro_p4.py`, picked by `board.board_id`.
+
+**What needs work, in order:**
+
+- [ ] **USB host (go/no-go).** The Fruit Jam's USB-A ports run on PIO-USB,
+      the host that gave v1 trouble on the Feather RP2040: V15 went silent
+      depending on the cable, and needed patched PIO-USB and TinyUSB builds
+      (DEVNOTES §6.5-6.7, §6.12). The DWC2 fix in #11836 doesn't apply to
+      PIO-USB. Check whether the ports sit behind an onboard hub: hub
+      installs were only tested on the Metro's DWC2, and a powered hub
+      didn't help V15 on the PIO host (§6.13). Also check
+      which `CFG_TUH_ENUMERATION_BUFSIZE` the RP2350 build uses. Spike: a
+      REPL-only V15 → SLOOP → V15 install on stock CircuitPython before any
+      UI work. If it fails as on the Feather, the port waits on upstream
+      PIO-USB/TinyUSB fixes.
+- [ ] **Touch.** A `Touch` for the TSC2007 (`adafruit_tsc2007`) giving the
+      same events as now: a calibration (raw to screen, kept in NVM like
+      the WiFi list, with a Settings screen to redo it), a pressure
+      threshold, smoothing for drags, and the pen interrupt instead of
+      polling I2C every frame. Retune swipes, the scrolling pages and the
+      Details drag, which were tuned on capacitive touch. Set the TSC2007
+      up again after any A1 reset, since that cycles its power.
+- [ ] **WiFi.** The ESP32-C6 is used as an AirLift (`adafruit_esp32spi`),
+      not the `wifi` module: a network object for Catalog (connect,
+      get_json, get, stream) and Settings (scan, join, saved networks) on
+      esp32spi. Time a full card update (about 46 MB) over SPI.
+- [ ] **Shared SPI bus.** Check whether the microSD and the ESP32-C6 share
+      the Touchdeck's SPI pins. If so it's v1's shared bus again (DEVNOTES
+      §6.16; the fix, adafruit/circuitpython#11695, is upstream): test
+      Catalog downloads to the card while the screen redraws, for stale or
+      corrupt sectors.
+- [ ] **Speed.** The RP2350 at 150 MHz is much slower than the P4; PSRAM
+      covers memory, so v1's RAM workarounds shouldn't return. Measure
+      picture conversion during Catalog, page drawing and smooth
+      scrolling, and list start-up. Installs are paced by the FM-1, so
+      they should take about as long once USB works.
+- [ ] **Small things.** Backlight dimming on D10; maybe Back/Install on
+      buttons A/B (leave the UART unused); does the Fruit Jam's
+      CircuitPython mount the card at `/sd` itself; power (no LiPo charger
+      on the Fruit Jam as far as we know, so USB or a power bank; the FM-1
+      still charges from the USB-A port).
+- [ ] **Guide.** Pages for the Fruit Jam build: hardware, touch
+      calibration, which CircuitPython.
+
+Estimate: if the USB spike passes on stock CircuitPython, about a week,
+mostly touch tuning and the esp32spi wrapper. If it doesn't, upstream
+USB host work comes first, as it did for the Feather and the Metro.
+
 ## Upstream and the hub
 
 - [x] Ask for a Metro P4 board-level enumeration buffer (512, or 4096 like
